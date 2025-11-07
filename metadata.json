@@ -1,0 +1,7 @@
+{
+  "name": "TICHAT: Asistente para Tenderos",
+  "description": "Una aplicación web para que los tenderos latinoamericanos gestionen su catálogo de productos de forma fácil y rápida usando audio, fotos y texto. Incluye herramientas inteligentes como sugerencias de precios y un modo de cajero rápido.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
