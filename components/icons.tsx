@@ -26,6 +26,9 @@ export const AssistantIcon = () => (
 export const ClientsIcon = () => (
     <svg {...iconProps}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
 );
+export const SettingsIcon = () => (
+    <svg {...iconProps}><path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.58-.21l-2.49 1a6.38 6.38 0 0 0-2.99-1.7V2.5A.5.5 0 0 0 13.5 2h-3a.5.5 0 0 0-.5.5v2.09A6.38 6.38 0 0 0 7.01 6.3l-2.49-1a.5.5 0 0 0-.58.21l-1.92 3.32a.49.49 0 0 0 .12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32a.49.49 0 0 0 .58.21l2.49-1a6.38 6.38 0 0 0 2.99 1.7V21.5a.5.5 0 0 0 .5.5h3a.5.5 0 0 0 .5-.5v-2.09a6.38 6.38 0 0 0 2.99-1.7l2.49 1a.5.5 0 0 0 .58-.21l1.92-3.32a.49.49 0 0 0-.12-.61l-2.01-1.58z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+);
 // FIX: Add and export the missing VideoIcon component.
 export const VideoIcon = ({ className = "mx-auto h-12 w-12" }) => (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>

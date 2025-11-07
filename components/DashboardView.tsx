@@ -34,7 +34,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const recentSales = [...sales].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 10);
   
   const uniqueCustomers = useMemo(() => {
-    return [...new Map(sales.map(s => [s.customerId, { id: s.customerId, name: s.customerName }])).values()];
+    const customerSales = sales.filter(s => s.customerId); // Exclude anonymous sales
+    return [...new Map(customerSales.map(s => [s.customerId, { id: s.customerId, name: s.customerName }])).values()];
   }, [sales]);
 
   const filteredSales = useMemo(() => {

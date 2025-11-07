@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Product, Customer, Sale, CartItem } from '../types';
+import React, { useState, useMemo } from 'react';
+import { Product, Customer, Sale, CartItem, ShopSettings } from '../types';
 
 interface CheckoutViewProps {
   products: Product[];
@@ -10,6 +10,7 @@ interface CheckoutViewProps {
   setCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
   selectedCustomer: Customer | null;
   setSelectedCustomer: React.Dispatch<React.SetStateAction<Customer | null>>;
+  shopSettings: ShopSettings;
 }
 
 export const CheckoutView: React.FC<CheckoutViewProps> = ({ 
@@ -20,17 +21,35 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
   cart,
   setCart,
   selectedCustomer,
-  setSelectedCustomer
+  setSelectedCustomer,
+  shopSettings
 }) => {
   const [isAddingCustomer, setIsAddingCustomer] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState('');
   const [newCustomerNickname, setNewCustomerNickname] = useState('');
   const [newCustomerPhone, setNewCustomerPhone] = useState('');
   const [newCustomerAddress, setNewCustomerAddress] = useState('');
+  const [isAnonymousSale, setIsAnonymousSale] = useState(false);
+
+  const handleSelectCustomer = (customer: Customer) => {
+    setIsAnonymousSale(false);
+    setSelectedCustomer(customer);
+    if (customer.id !== selectedCustomer?.id) {
+      setCart([]);
+    }
+  };
+
+  const handleSelectAnonymous = () => {
+    setSelectedCustomer(null);
+    setIsAnonymousSale(true);
+    if (!isAnonymousSale) {
+      setCart([]);
+    }
+  };
 
   const addToCart = (product: Product) => {
-    if (!selectedCustomer) {
-        alert("Por favor, selecciona un cliente antes de agregar productos.");
+    if (!selectedCustomer && !isAnonymousSale) {
+        alert("Por favor, selecciona un cliente o elige 'Venta de Mostrador'.");
         return;
     }
     setCart((prevCart) => {
@@ -56,7 +75,19 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
     });
   };
 
-  const total = cart.reduce((sum, item) => sum + item.price * item.cartQuantity, 0);
+  const subtotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.cartQuantity, 0), [cart]);
+
+  const deliveryCost = useMemo(() => {
+    if (isAnonymousSale || !selectedCustomer) {
+      return 0;
+    }
+    if (shopSettings.hasFreeDeliveryOption && subtotal >= shopSettings.freeDeliveryThreshold) {
+      return 0;
+    }
+    return shopSettings.deliveryFee;
+  }, [isAnonymousSale, selectedCustomer, subtotal, shopSettings]);
+
+  const finalTotal = subtotal + deliveryCost;
 
   const handleSaveCustomer = (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,29 +102,47 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
   };
 
   const handleFinalizeSale = () => {
-    if (!selectedCustomer || cart.length === 0) return;
+    if (cart.length === 0 || (!selectedCustomer && !isAnonymousSale)) return;
 
-    const newSale: Sale = {
-        id: self.crypto.randomUUID(),
-        customerId: selectedCustomer.id,
-        customerName: selectedCustomer.name,
-        items: cart,
-        total,
-        date: new Date().toISOString(),
-        status: 'pending', // Default status is now 'pending'
-    };
-    onAddSale(newSale);
-    
-    let message = `¡Hola ${selectedCustomer.name}! 👋\n\nAquí está el resumen de tu compra en TICHAT:\n\n`;
-    cart.forEach(item => {
-        message += `*${item.name}* (${item.cartQuantity} x $${item.price.toLocaleString('es-CO')}) = $${(item.cartQuantity * item.price).toLocaleString('es-CO')}\n`;
-    });
-    message += `\n*TOTAL A PAGAR: $${total.toLocaleString('es-CO')}*`;
+    if (isAnonymousSale) {
+        const newSale: Sale = {
+            id: self.crypto.randomUUID(),
+            customerName: 'Cliente Anónimo',
+            items: cart,
+            total: subtotal,
+            date: new Date().toISOString(),
+            status: 'paid', // Anonymous sales are paid immediately
+        };
+        onAddSale(newSale);
+        setIsAnonymousSale(false); // Reset for next sale
+    } else if (selectedCustomer) {
+        const newSale: Sale = {
+            id: self.crypto.randomUUID(),
+            customerId: selectedCustomer.id,
+            customerName: selectedCustomer.name,
+            items: cart,
+            total: finalTotal,
+            date: new Date().toISOString(),
+            status: 'pending',
+            deliveryFeeApplied: deliveryCost,
+        };
+        onAddSale(newSale);
+        
+        let message = `¡Hola ${selectedCustomer.name}! 👋\n\n${shopSettings.welcomeMessage}\nAquí está el resumen de tu compra en *${shopSettings.storeName}*:\n\n`;
+        cart.forEach(item => {
+            message += `*${item.name}* (${item.cartQuantity} x $${item.price.toLocaleString('es-CO')}) = $${(item.cartQuantity * item.price).toLocaleString('es-CO')}\n`;
+        });
+        message += `\nSubtotal: $${subtotal.toLocaleString('es-CO')}`;
+        message += `\nCosto Domicilio: $${deliveryCost.toLocaleString('es-CO')}`;
+        if (deliveryCost === 0 && shopSettings.hasFreeDeliveryOption && subtotal >= shopSettings.freeDeliveryThreshold) {
+            message += ` (¡Gratis por tu compra!)`;
+        }
+        message += `\n\n*TOTAL A PAGAR: $${finalTotal.toLocaleString('es-CO')}*`;
 
-    const encodedMessage = encodeURIComponent(message);
-    // Remove non-numeric characters from phone for the URL
-    const cleanPhone = selectedCustomer.phone.replace(/\D/g, '');
-    window.open(`https://wa.me/${cleanPhone}?text=${encodedMessage}`, '_blank');
+        const encodedMessage = encodeURIComponent(message);
+        const cleanPhone = selectedCustomer.phone.replace(/\D/g, '');
+        window.open(`https://wa.me/${cleanPhone}?text=${encodedMessage}`, '_blank');
+    }
   }
 
   return (
@@ -114,22 +163,25 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
                     </div>
                 </form>
             ) : (
-                <>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
+                <div className="space-y-3">
+                    <button onClick={handleSelectAnonymous} className={`w-full p-3 text-center rounded-md border text-base font-semibold ${isAnonymousSale ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-gray-100 text-gray-800 border-gray-300 hover:bg-gray-200'}`}>
+                        Venta de Mostrador (Anónimo)
+                    </button>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                         {customers.map(c => (
-                            <button key={c.id} onClick={() => setSelectedCustomer(c)} className={`p-2 text-left rounded-md border ${selectedCustomer?.id === c.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}>
+                            <button key={c.id} onClick={() => handleSelectCustomer(c)} className={`p-2 text-left rounded-md border ${selectedCustomer?.id === c.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}>
                                <span className="block text-sm font-semibold truncate">{c.nickname}</span>
                                <span className={`block text-xs truncate ${selectedCustomer?.id === c.id ? 'text-indigo-200' : 'text-gray-500'}`}>{c.name}</span>
                             </button>
                         ))}
                     </div>
                     <button onClick={() => setIsAddingCustomer(true)} className="w-full py-2 px-4 bg-green-500 text-white font-semibold rounded-md hover:bg-green-600">+ Agregar Nuevo Cliente</button>
-                </>
+                </div>
             )}
         </div>
         
         <h2 className="text-xl font-bold text-gray-800 mb-4">2. Agrega Productos</h2>
-        <div className={`space-y-2 max-h-96 overflow-y-auto pr-2 ${!selectedCustomer ? 'opacity-50' : ''}`}>
+        <div className={`space-y-2 max-h-96 overflow-y-auto pr-2 ${!selectedCustomer && !isAnonymousSale ? 'opacity-50' : ''}`}>
           {products.map((product) => (
             <div key={product.id} className="flex items-center justify-between p-3 bg-white rounded-lg shadow">
               <div>
@@ -138,7 +190,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
               </div>
               <button
                 onClick={() => addToCart(product)}
-                disabled={!selectedCustomer}
+                disabled={!selectedCustomer && !isAnonymousSale}
                 className="px-4 py-1 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:bg-indigo-300"
               >
                 Agregar
@@ -151,12 +203,12 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
       {/* Columna Derecha: Cuenta Actual */}
       <div className="bg-white p-6 rounded-lg shadow-lg">
         <h2 className="text-xl font-bold text-gray-800 mb-4">
-            Cuenta de: <span className="text-indigo-600">{selectedCustomer?.nickname || '...'}</span>
-            {selectedCustomer && <span className="text-base font-normal text-gray-500 ml-2">({selectedCustomer.name})</span>}
+            Cuenta de: <span className="text-indigo-600">{isAnonymousSale ? 'Cliente Anónimo' : selectedCustomer?.nickname || '...'}</span>
+            {!isAnonymousSale && selectedCustomer && <span className="text-base font-normal text-gray-500 ml-2">({selectedCustomer.name})</span>}
         </h2>
         <div className="space-y-3 min-h-[200px]">
           {cart.length === 0 ? (
-            <p className="text-gray-500 text-center pt-8">{selectedCustomer ? "Agrega productos para empezar." : "Selecciona un cliente para iniciar."}</p>
+            <p className="text-gray-500 text-center pt-8">{selectedCustomer || isAnonymousSale ? "Agrega productos para empezar." : "Selecciona un cliente o modo para iniciar."}</p>
           ) : (
             cart.map((item) => (
               <div key={item.id} className="flex items-center justify-between">
@@ -175,16 +227,34 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
           )}
         </div>
         <hr className="my-4"/>
+        <div className="space-y-2 text-lg">
+            <div className="flex justify-between items-center text-gray-700">
+                <span>Subtotal:</span>
+                <span>${subtotal.toLocaleString('es-CO')}</span>
+            </div>
+            {selectedCustomer && !isAnonymousSale && (
+                <div className="flex justify-between items-center text-gray-700">
+                    <span>Costo Domicilio:</span>
+                    <span>
+                        {deliveryCost > 0 
+                            ? `$${deliveryCost.toLocaleString('es-CO')}`
+                            : <span className="font-semibold text-green-600">¡Gratis!</span>
+                        }
+                    </span>
+                </div>
+            )}
+        </div>
+        <hr className="my-4 border-dashed"/>
         <div className="flex justify-between items-center text-2xl font-bold">
           <span>Total:</span>
-          <span>${total.toLocaleString('es-CO')}</span>
+          <span>${finalTotal.toLocaleString('es-CO')}</span>
         </div>
         <button
             onClick={handleFinalizeSale}
-            disabled={cart.length === 0 || !selectedCustomer}
+            disabled={cart.length === 0 || (!selectedCustomer && !isAnonymousSale)}
             className="mt-6 w-full py-3 px-4 border border-transparent rounded-md shadow-sm text-base font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:bg-green-300"
         >
-            Finalizar y Enviar a WhatsApp
+            {isAnonymousSale ? 'Finalizar Venta' : 'Finalizar y Enviar a WhatsApp'}
         </button>
       </div>
     </div>

@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Product, AppView, Customer, Sale, SaleStatus, WhatsAppOrder, CartItem } from './types';
-import { InventoryIcon, CheckoutIcon, DashboardIcon, AssistantIcon, ClientsIcon } from './components/icons';
+import { Product, AppView, Customer, Sale, SaleStatus, WhatsAppOrder, CartItem, ShopSettings } from './types';
+import { InventoryIcon, CheckoutIcon, DashboardIcon, AssistantIcon, ClientsIcon, SettingsIcon } from './components/icons';
 import { InventoryView } from './components/InventoryView';
 import { CheckoutView } from './components/CheckoutView';
 import { DashboardView } from './components/DashboardView';
 import { LiveAssistantView } from './components/LiveAssistantView';
 import { ClientsView } from './components/ClientsView';
+import { SettingsView } from './components/SettingsView';
 
 
 const sampleProducts: Product[] = [
@@ -37,17 +38,33 @@ const sampleWhatsAppOrders: WhatsAppOrder[] = [
   }
 ];
 
+const initialShopSettings: ShopSettings = {
+  storeName: "Mi Tienda de Barrio",
+  address: "Calle Falsa 123, Bogotá",
+  welcomeMessage: "¡Gracias por tu compra! Tu pedido está en camino.",
+  openingTime: "08:00",
+  closingTime: "20:00",
+  deliveryFee: 3000,
+  deliveryStaffCount: 2,
+  hasFreeDeliveryOption: true,
+  freeDeliveryThreshold: 50000,
+};
+
 function App() {
   const [products, setProducts] = useState<Product[]>(sampleProducts);
   const [customers, setCustomers] = useState<Customer[]>(sampleCustomers);
   const [sales, setSales] = useState<Sale[]>([]);
   const [whatsAppOrders, setWhatsAppOrders] = useState<WhatsAppOrder[]>(sampleWhatsAppOrders);
+  const [shopSettings, setShopSettings] = useState<ShopSettings>(initialShopSettings);
   const [view, setView] = useState<AppView>('dashboard');
 
   // State lifted from CheckoutView
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
 
+  const handleUpdateSettings = (newSettings: ShopSettings) => {
+    setShopSettings(newSettings);
+  };
 
   const handleAddCustomer = (name: string, nickname: string, phone: string, address: string, idNumber?: string, email?: string) => {
     const newCustomer: Customer = {
@@ -118,6 +135,7 @@ function App() {
                   setCart={setCart}
                   selectedCustomer={selectedCustomer}
                   setSelectedCustomer={setSelectedCustomer}
+                  shopSettings={shopSettings}
                 />;
       case 'dashboard':
         return <DashboardView 
@@ -137,6 +155,8 @@ function App() {
                   onUpdateCustomer={handleUpdateCustomer}
                   onDeleteCustomer={handleDeleteCustomer} 
                 />;
+      case 'settings':
+        return <SettingsView settings={shopSettings} onUpdateSettings={handleUpdateSettings} />;
       default:
         return <InventoryView products={products} setProducts={setProducts} />;
     }
@@ -173,6 +193,7 @@ function App() {
                 <NavButton targetView="checkout" icon={<CheckoutIcon />} label="Cajero Rápido" />
                 <NavButton targetView="clients" icon={<ClientsIcon />} label="Clientes" />
                 <NavButton targetView="assistant" icon={<AssistantIcon />} label="Asistente" />
+                <NavButton targetView="settings" icon={<SettingsIcon />} label="Configuración" />
             </div>
         </nav>
       </header>

@@ -26,12 +26,13 @@ export type SaleStatus = 'pending' | 'paid' | 'annulled';
 
 export interface Sale {
   id: string;
-  customerId: string;
+  customerId?: string; // Made optional for anonymous sales
   customerName: string;
   items: CartItem[];
   total: number;
   date: string;
   status: SaleStatus;
+  deliveryFeeApplied?: number;
 }
 
 export type WhatsAppOrderStatus = 'pending' | 'confirmed' | 'rejected';
@@ -46,5 +47,17 @@ export interface WhatsAppOrder {
   receivedAt: string;
 }
 
+export interface ShopSettings {
+  storeName: string;
+  address: string;
+  welcomeMessage: string;
+  openingTime: string;
+  closingTime: string;
+  deliveryFee: number;
+  deliveryStaffCount: number;
+  hasFreeDeliveryOption: boolean;
+  freeDeliveryThreshold: number;
+}
 
-export type AppView = 'inventory' | 'checkout' | 'dashboard' | 'assistant' | 'clients';
+
+export type AppView = 'inventory' | 'checkout' | 'dashboard' | 'assistant' | 'clients' | 'settings';
