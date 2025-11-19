@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { Product, AppView, Customer, Sale, SaleStatus, WhatsAppOrder, CartItem, ShopSettings } from './types';
 import { InventoryIcon, CheckoutIcon, DashboardIcon, AssistantIcon, ClientsIcon, SettingsIcon } from './components/icons';
 import { InventoryView } from './components/InventoryView';
@@ -7,7 +8,8 @@ import { DashboardView } from './components/DashboardView';
 import { LiveAssistantView } from './components/LiveAssistantView';
 import { ClientsView } from './components/ClientsView';
 import { SettingsView } from './components/SettingsView';
-
+import { supabase, isSupabaseConfigured } from './services/supabaseClient';
+import { parseProductsFromText } from './services/geminiService'; // Re-use Gemini logic
 
 const sampleProducts: Product[] = [
     { id: '1', name: 'Papas Margarita Pollo 25g', quantity: 20, price: 1500, category: 'Snacks', unit: 'unidad' },
@@ -57,10 +59,79 @@ function App() {
   const [whatsAppOrders, setWhatsAppOrders] = useState<WhatsAppOrder[]>(sampleWhatsAppOrders);
   const [shopSettings, setShopSettings] = useState<ShopSettings>(initialShopSettings);
   const [view, setView] = useState<AppView>('dashboard');
+  const [supabaseConnected, setSupabaseConnected] = useState(false);
 
-  // State lifted from CheckoutView
+  // State for the checkout view
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [checkoutSelection, setCheckoutSelection] = useState<Customer | 'anonymous' | null>(null);
+
+  // Supabase Realtime Subscription
+  useEffect(() => {
+    if (!isSupabaseConfigured()) {
+        console.log("Supabase not configured. Using sample data.");
+        return;
+    }
+
+    setSupabaseConnected(true);
+
+    const channel = supabase
+      .channel('whatsapp-orders')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'whatsapp_messages' },
+        async (payload) => {
+          console.log('New WhatsApp message received:', payload);
+          const newMessage = payload.new;
+          
+          // Process the text with Gemini to extract products
+          let parsedItems: CartItem[] = [];
+          try {
+              // Only parse if we have products loaded to match against
+              const extractedData = await parseProductsFromText(newMessage.message_body);
+              
+              // Match extracted items with existing inventory
+              parsedItems = extractedData.map(extracted => {
+                  // Simple fuzzy match or direct match logic could go here
+                  // For now, we map to a generic item but try to find match by name
+                  const existing = products.find(p => p.name.toLowerCase().includes(extracted.name.toLowerCase()));
+                  if (existing) {
+                      return { ...existing, cartQuantity: extracted.quantity };
+                  }
+                  // If not found, return as a temporary item (handling this would require more robust logic)
+                  return {
+                      id: self.crypto.randomUUID(),
+                      name: extracted.name,
+                      price: extracted.price,
+                      quantity: 999, // Virtual stock
+                      category: extracted.category,
+                      unit: extracted.unit,
+                      cartQuantity: extracted.quantity
+                  };
+              });
+          } catch (e) {
+              console.error("Error parsing incoming WhatsApp message:", e);
+          }
+
+          const newOrder: WhatsAppOrder = {
+              id: newMessage.id || self.crypto.randomUUID(),
+              customerPhone: newMessage.from_phone,
+              customerName: newMessage.profile_name || newMessage.from_phone,
+              originalMessage: newMessage.message_body,
+              parsedItems: parsedItems,
+              status: 'pending',
+              receivedAt: newMessage.created_at || new Date().toISOString(),
+          };
+
+          setWhatsAppOrders(prev => [newOrder, ...prev]);
+          // Optional: Play a sound here
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [products]);
 
   const handleUpdateSettings = (newSettings: ShopSettings) => {
     setShopSettings(newSettings);
@@ -88,10 +159,29 @@ function App() {
   };
 
   const handleAddSale = (sale: Sale) => {
+    // 1. Add sale to history
     setSales(prev => [...prev, sale]);
-    // Reset checkout state after sale
+    
+    // 2. Update product inventory based on the sale
+    setProducts(prevProducts => {
+      const updatedProducts = [...prevProducts];
+      for (const item of sale.items) {
+        const productIndex = updatedProducts.findIndex(p => p.id === item.id);
+        if (productIndex > -1) {
+          // Ensure quantity doesn't go below zero
+          const newQuantity = updatedProducts[productIndex].quantity - item.cartQuantity;
+          updatedProducts[productIndex] = {
+            ...updatedProducts[productIndex],
+            quantity: Math.max(0, newQuantity),
+          };
+        }
+      }
+      return updatedProducts;
+    });
+
+    // 3. Reset checkout state after sale
     setCart([]);
-    setSelectedCustomer(null);
+    setCheckoutSelection(null);
   };
 
   const handleUpdateSaleStatus = (saleId: string, status: SaleStatus) => {
@@ -105,7 +195,7 @@ function App() {
     // Find customer by phone, or use a placeholder
     const customer = customers.find(c => c.phone === order.customerPhone) || null;
     
-    setSelectedCustomer(customer);
+    setCheckoutSelection(customer);
     setCart(order.parsedItems);
     
     // Update order status
@@ -133,8 +223,8 @@ function App() {
                   onAddSale={handleAddSale}
                   cart={cart}
                   setCart={setCart}
-                  selectedCustomer={selectedCustomer}
-                  setSelectedCustomer={setSelectedCustomer}
+                  checkoutSelection={checkoutSelection}
+                  setCheckoutSelection={setCheckoutSelection}
                   shopSettings={shopSettings}
                 />;
       case 'dashboard':
@@ -147,7 +237,7 @@ function App() {
                   onRejectWhatsAppOrder={handleRejectWhatsAppOrder}
                 />;
       case 'assistant':
-        return <LiveAssistantView />;
+        return <LiveAssistantView products={products} sales={sales} customers={customers} />;
       case 'clients':
         return <ClientsView 
                   customers={customers} 
@@ -186,6 +276,14 @@ function App() {
             <svg className="w-10 h-10" viewBox="0 0 24 24" fill="currentColor"><path d="M21.99 4c0-1.1-.89-2-1.99-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2h14l4 4-.01-18zM18 14H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"></path></svg>
             <h1 className="text-2xl font-bold">TICHAT</h1>
         </div>
+        
+        {!supabaseConnected && (
+            <div className="bg-indigo-800 p-2 rounded text-xs text-indigo-200 mb-2">
+                Modo Demo (Offline)<br/>
+                <span className="text-[10px] opacity-75">Configura Supabase para activar WhatsApp Real</span>
+            </div>
+        )}
+
         <nav className="flex-grow">
             <div className="flex md:flex-col md:space-y-2 justify-around md:justify-start">
                 <NavButton targetView="dashboard" icon={<DashboardIcon />} label="Dashboard" />

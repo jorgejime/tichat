@@ -14,7 +14,8 @@
     "@google/genai": "^1.29.0",
     "recharts": "^3.3.0",
     "jspdf": "^3.0.3",
-    "jspdf-autotable": "^5.0.2"
+    "jspdf-autotable": "^5.0.2",
+    "@supabase/supabase-js": "^2.39.3"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

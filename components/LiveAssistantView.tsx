@@ -1,7 +1,10 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI, LiveServerMessage, Modality, Blob, LiveSession } from '@google/genai';
+import { GoogleGenAI, LiveServerMessage, Modality, Blob, LiveSession, FunctionDeclaration, Type } from '@google/genai';
 import { MicIcon, StopIcon } from './icons';
+import { Product, Sale, Customer } from '../types';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 
 // Audio utility functions
 const decode = (base64: string) => {
@@ -46,10 +49,24 @@ const createBlob = (data: Float32Array): Blob => {
     };
 };
 
-export const LiveAssistantView: React.FC = () => {
+interface ActionSuggestion {
+    label: string;
+    icon: React.ReactNode;
+    color: string;
+    action: () => void;
+}
+
+interface LiveAssistantViewProps {
+    products: Product[];
+    sales: Sale[];
+    customers: Customer[];
+}
+
+export const LiveAssistantView: React.FC<LiveAssistantViewProps> = ({ products, sales, customers }) => {
     const [isActive, setIsActive] = useState(false);
     const [transcriptions, setTranscriptions] = useState<{ user: string; model: string }[]>([]);
     const [currentTurn, setCurrentTurn] = useState({ user: '', model: '' });
+    const [actionSuggestion, setActionSuggestion] = useState<ActionSuggestion | null>(null);
     
     const sessionRef = useRef<Promise<LiveSession> | null>(null);
     const inputAudioContextRef = useRef<AudioContext | null>(null);
@@ -61,6 +78,123 @@ export const LiveAssistantView: React.FC = () => {
     let nextStartTime = 0;
     const sources = new Set<AudioBufferSourceNode>();
 
+    // --- Tools Definitions ---
+    const createSupplierOrderTool: FunctionDeclaration = {
+        name: 'create_supplier_order',
+        description: 'Genera un pedido para proveedores. Úsalo cuando el usuario quiera pedir productos, hacer surtido, o enviar lista de compras.',
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                format: {
+                    type: Type.STRING,
+                    enum: ['pdf', 'whatsapp'],
+                    description: 'Formato del pedido: "pdf" para documento, "whatsapp" para mensaje.'
+                }
+            },
+            required: ['format']
+        }
+    };
+
+    const reportDebtsTool: FunctionDeclaration = {
+        name: 'report_debts',
+        description: 'Genera reporte de deudores/fiados. Úsalo cuando el usuario pregunte quién debe, cuentas por cobrar o fiados.',
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                format: {
+                    type: Type.STRING,
+                    enum: ['pdf', 'whatsapp'],
+                    description: 'Formato del reporte.'
+                }
+            },
+            required: ['format']
+        }
+    };
+
+    // --- Action Implementations (Preparation) ---
+    const prepareSupplierPDF = () => {
+        const lowStock = products.filter(p => p.quantity <= 5);
+        const doc = new jsPDF();
+        doc.setFontSize(18);
+        doc.text("Pedido Sugerido a Proveedores", 14, 16);
+        doc.setFontSize(12);
+        doc.text(`Fecha: ${new Date().toLocaleDateString()}`, 14, 24);
+        doc.text("Tienda: TICHAT", 14, 30);
+        
+        (doc as any).autoTable({
+            startY: 35,
+            head: [['Producto', 'Cat.', 'Stock', 'A Pedir (Sug.)']],
+            body: lowStock.map(p => [p.name, p.category, p.quantity, Math.max(12, 20 - p.quantity)]),
+            theme: 'grid',
+        });
+        
+        setActionSuggestion({
+            label: "Descargar Pedido PDF",
+            icon: <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>,
+            color: "bg-red-600 hover:bg-red-700",
+            action: () => doc.save('pedido_proveedores.pdf')
+        });
+    };
+
+    const prepareSupplierWhatsApp = () => {
+        const lowStock = products.filter(p => p.quantity <= 5);
+        let message = "📋 *PEDIDO A PROVEEDORES*\nHola, necesito cotizar lo siguiente:\n\n";
+        lowStock.forEach(p => {
+            message += `[ ] ${p.name} (Stock: ${p.quantity})\n`;
+        });
+        message += "\nGracias.";
+        
+        setActionSuggestion({
+            label: "Enviar Pedido por WhatsApp",
+            icon: <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.008-.57-.008-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>,
+            color: "bg-green-600 hover:bg-green-700",
+            action: () => window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank')
+        });
+    };
+
+    const prepareDebtsPDF = () => {
+        const pendingSales = sales.filter(s => s.status === 'pending');
+        const doc = new jsPDF();
+        doc.text("Reporte de Cuentas por Cobrar", 14, 16);
+        
+        (doc as any).autoTable({
+            startY: 22,
+            head: [['Cliente', 'Fecha', 'Monto']],
+            body: pendingSales.map(s => {
+                const cName = customers.find(c => c.id === s.customerId)?.nickname || s.customerName;
+                return [cName, new Date(s.date).toLocaleDateString(), `$${s.total.toLocaleString('es-CO')}`];
+            }),
+        });
+        
+        const totalDebt = pendingSales.reduce((sum, s) => sum + s.total, 0);
+        doc.text(`Total Deuda: $${totalDebt.toLocaleString('es-CO')}`, 14, (doc as any).lastAutoTable.finalY + 10);
+        
+        setActionSuggestion({
+            label: "Descargar Reporte Deudas",
+            icon: <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>,
+            color: "bg-indigo-600 hover:bg-indigo-700",
+            action: () => doc.save('reporte_deudas.pdf')
+        });
+    };
+
+    const prepareDebtsWhatsApp = () => {
+        const pendingSales = sales.filter(s => s.status === 'pending');
+        let message = "🚨 *REPORTE DE COBROS*\n\n";
+        pendingSales.forEach(s => {
+             const cName = customers.find(c => c.id === s.customerId)?.nickname || s.customerName;
+             message += `- ${cName}: $${s.total.toLocaleString('es-CO')} (${new Date(s.date).toLocaleDateString()})\n`;
+        });
+        const totalDebt = pendingSales.reduce((sum, s) => sum + s.total, 0);
+        message += `\n*Total Pendiente: $${totalDebt.toLocaleString('es-CO')}*`;
+        
+        setActionSuggestion({
+            label: "Enviar Cobros WhatsApp",
+            icon: <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.008-.57-.008-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>,
+            color: "bg-teal-600 hover:bg-teal-700",
+            action: () => window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank')
+        });
+    };
+
     const startConversation = async () => {
         if (!process.env.API_KEY) return;
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -68,12 +202,47 @@ export const LiveAssistantView: React.FC = () => {
         setIsActive(true);
         setTranscriptions([]);
         setCurrentTurn({ user: '', model: '' });
+        setActionSuggestion(null);
 
         inputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
         outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
 
         streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
 
+        // --- Build Context for AI ---
+        const inventoryList = products.map(p => 
+            `- ${p.name}: Stock ${p.quantity} ${p.unit}s, Precio $${p.price}`
+        ).join('\n');
+
+        const pendingSales = sales.filter(s => s.status === 'pending');
+        const debtList = pendingSales.map(s => {
+            const customerName = customers.find(c => c.id === s.customerId)?.nickname || s.customerName;
+            return `- Cliente: ${customerName} debe $${s.total} (Fecha: ${new Date(s.date).toLocaleDateString()})`;
+        }).join('\n');
+        
+        const debtsContext = debtList.length > 0 ? debtList : "No hay deudas pendientes actualmente.";
+        const lowStock = products.filter(p => p.quantity <= 5).map(p => p.name).join(', ');
+        const supplierContext = lowStock.length > 0 ? `Productos con stock bajo (<=5): ${lowStock}` : "Inventario saludable.";
+
+        const systemInstruction = `
+        Eres el asistente de TICHAT. Tienes acceso al inventario y deudas.
+        
+        INVENTARIO:
+        ${inventoryList}
+        DEUDAS:
+        ${debtsContext}
+        STOCK BAJO:
+        ${supplierContext}
+
+        REGLAS DE ORO PARA HERRAMIENTAS:
+        1. Si el usuario pide "crear pedido", "hacer pedido a proveedor", "qué hace falta" -> USA 'create_supplier_order'.
+        2. Si el usuario pide "quién debe", "cuentas por cobrar", "fiados" -> USA 'report_debts'.
+        3. NO preguntes "¿quieres que lo haga?", HAZLO directamente si la intención es clara.
+        4. Si no especifican formato (PDF o WhatsApp), asume WhatsApp por defecto para ser rápido.
+        
+        Responde brevemente y confirma la acción realizada.
+        `;
+        
         sessionRef.current = ai.live.connect({
             model: 'gemini-2.5-flash-native-audio-preview-09-2025',
             callbacks: {
@@ -103,6 +272,34 @@ export const LiveAssistantView: React.FC = () => {
                         setTranscriptions(prev => [...prev, currentTurn]);
                         setCurrentTurn({ user: '', model: '' });
                     }
+                    
+                    // Handle Tool Calls
+                    if (message.toolCall) {
+                        for (const fc of message.toolCall.functionCalls) {
+                            let result = "Acción preparada en pantalla.";
+                            const format = (fc.args as any).format || 'whatsapp';
+                            
+                            if (fc.name === 'create_supplier_order') {
+                                if (format === 'pdf') prepareSupplierPDF();
+                                else prepareSupplierWhatsApp();
+                                result = `He preparado el botón para el pedido en ${format}.`;
+                            } else if (fc.name === 'report_debts') {
+                                if (format === 'pdf') prepareDebtsPDF();
+                                else prepareDebtsWhatsApp();
+                                result = `He preparado el botón para el reporte de deudas en ${format}.`;
+                            }
+                            
+                            sessionRef.current?.then(session => {
+                                session.sendToolResponse({
+                                    functionResponses: [{
+                                        id: fc.id,
+                                        name: fc.name,
+                                        response: { result: result }
+                                    }]
+                                });
+                            });
+                        }
+                    }
 
                     const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
                     if (base64Audio && outputAudioContextRef.current) {
@@ -124,13 +321,15 @@ export const LiveAssistantView: React.FC = () => {
                 responseModalities: [Modality.AUDIO],
                 inputAudioTranscription: {},
                 outputAudioTranscription: {},
-                systemInstruction: 'Eres un asistente amigable y útil para dueños de pequeñas tiendas. Habla en español.',
+                systemInstruction: systemInstruction,
+                tools: [{ functionDeclarations: [createSupplierOrderTool, reportDebtsTool] }],
             },
         });
     };
     
     const stopConversation = (shouldCloseSession = true) => {
         setIsActive(false);
+        setActionSuggestion(null);
 
         if (shouldCloseSession) {
             sessionRef.current?.then(session => session.close());
@@ -151,7 +350,6 @@ export const LiveAssistantView: React.FC = () => {
     };
     
     useEffect(() => {
-        // Cleanup on unmount
         return () => {
             if (isActive) {
                 stopConversation();
@@ -161,12 +359,12 @@ export const LiveAssistantView: React.FC = () => {
     }, [isActive]);
 
     return (
-        <div className="p-4 md:p-6 lg:p-8 flex flex-col items-center h-full">
-            <h2 className="text-2xl font-bold text-gray-800">Asistente de Voz en Vivo</h2>
-            <p className="text-gray-600 mb-6">Habla con el asistente para obtener ayuda o información.</p>
+        <div className="p-4 md:p-6 lg:p-8 flex flex-col items-center h-full relative">
+            <h2 className="text-2xl font-bold text-gray-800">Asistente Inteligente de Negocio</h2>
+            <p className="text-gray-600 mb-6">Tu experto en inventario, cobranzas y proveedores.</p>
 
-            <div className="w-full max-w-2xl bg-white rounded-lg shadow-lg p-4 flex-grow">
-                <div className="h-full overflow-y-auto space-y-4">
+            <div className="w-full max-w-2xl bg-white rounded-lg shadow-lg p-4 flex-grow flex flex-col relative overflow-hidden">
+                <div className="flex-grow overflow-y-auto space-y-4 pb-24">
                     {transcriptions.map((turn, index) => (
                         <div key={index}>
                             <p className="text-blue-600 font-semibold">Tú: <span className="font-normal text-gray-800">{turn.user}</span></p>
@@ -180,19 +378,45 @@ export const LiveAssistantView: React.FC = () => {
                         </div>
                     )}
                     {!isActive && transcriptions.length === 0 && (
-                        <p className="text-center text-gray-500 pt-10">Presiona "Empezar" para hablar.</p>
+                        <div className="text-center text-gray-500 pt-10 space-y-4">
+                             <div className="bg-indigo-50 p-4 rounded-lg inline-block text-left mx-auto">
+                                <p className="font-bold text-indigo-900 mb-2">Prueba decir:</p>
+                                <ul className="list-disc list-inside space-y-1 text-sm">
+                                    <li>"Haz un pedido a proveedores para WhatsApp"</li>
+                                    <li>"Dame un PDF de los productos que faltan"</li>
+                                    <li>"¿Quién me debe plata?"</li>
+                                    <li>"Saca el reporte de fiados en PDF"</li>
+                                </ul>
+                             </div>
+                        </div>
                     )}
                 </div>
+                
+                {/* Action Button Area */}
+                {actionSuggestion && (
+                    <div className="absolute bottom-4 left-4 right-4 z-20 animate-slide-up">
+                        <button 
+                            onClick={() => {
+                                actionSuggestion.action();
+                                setActionSuggestion(null); // Clear after click
+                            }}
+                            className={`w-full flex items-center justify-center gap-3 px-6 py-4 text-white font-bold text-lg rounded-xl shadow-xl transition-transform transform hover:scale-105 active:scale-95 ${actionSuggestion.color}`}
+                        >
+                            {actionSuggestion.icon}
+                            {actionSuggestion.label}
+                        </button>
+                    </div>
+                )}
             </div>
 
             <div className="mt-6">
                 {!isActive ? (
-                    <button onClick={startConversation} className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white font-semibold rounded-full shadow-lg hover:bg-green-700 transition-colors">
-                        <MicIcon /> Empezar a Hablar
+                    <button onClick={startConversation} className="flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-indigo-600 to-blue-600 text-white font-bold text-lg rounded-full shadow-xl hover:from-indigo-700 hover:to-blue-700 transition-all transform hover:scale-105">
+                        <MicIcon className="w-6 h-6"/> CONECTAR CON TIENDA
                     </button>
                 ) : (
-                    <button onClick={() => stopConversation()} className="flex items-center gap-2 px-6 py-3 bg-red-600 text-white font-semibold rounded-full shadow-lg hover:bg-red-700 transition-colors">
-                        <StopIcon /> Detener Conversación
+                    <button onClick={() => stopConversation()} className="flex items-center gap-2 px-8 py-4 bg-red-600 text-white font-bold text-lg rounded-full shadow-xl hover:bg-red-700 transition-colors animate-pulse">
+                        <StopIcon className="w-6 h-6"/> DESCONECTAR
                     </button>
                 )}
             </div>

@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type, GenerateContentResponse, Part } from "@google/genai";
+import { GoogleGenAI, Type, GenerateContentResponse, Part, Modality } from "@google/genai";
 import { Product } from '../types';
 
 if (!process.env.API_KEY) {
@@ -133,7 +133,6 @@ export const analyzeShelfImage = async (base64Image: string, mimeType: string): 
   }
 };
 
-// FIX: Add and export the missing 'analyzeVideo' function.
 export const analyzeVideo = async (base64Video: string, mimeType: string, prompt: string): Promise<string> => {
   try {
     const videoPart = {
@@ -178,7 +177,17 @@ export const getPriceSuggestion = async (productName: string): Promise<string> =
     try {
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
-            contents: `¿Cuál es el precio de venta al público sugerido para "${productName}" en una tienda de barrio en Colombia? Responde solo con un rango de precios o un precio aproximado.`,
+            contents: `Actúa como un consultor experto en retail y economía para tiendas de barrio en Colombia.
+            Analiza el producto: "${productName}".
+            
+            Considerando:
+            1. La popularidad general del producto.
+            2. Tendencias actuales del mercado.
+            3. Márgenes de ganancia típicos para tiendas pequeñas.
+
+            Proporciona un precio de venta sugerido competitivo y una justificación muy breve (máximo 15 palabras) sobre por qué (ej: "Alta demanda", "Escasez estacional", "Producto básico").
+            
+            Formato de respuesta deseado: "Precio: $XXXX - Justificación: [Tu justificación]"`,
             config: {
                 tools: [{ googleSearch: {} }],
             },
@@ -186,7 +195,7 @@ export const getPriceSuggestion = async (productName: string): Promise<string> =
         return response.text;
     } catch (error) {
         console.error("Error getting price suggestion:", error);
-        return "No pude encontrar una sugerencia.";
+        return "No pude encontrar una sugerencia precisa en este momento.";
     }
 };
 
@@ -196,7 +205,7 @@ export const textToSpeech = async (text: string): Promise<string | null> => {
             model: "gemini-2.5-flash-preview-tts",
             contents: [{ parts: [{ text: `Di amigablemente: ${text}` }] }],
             config: {
-                responseModalities: ['AUDIO'],
+                responseModalities: [Modality.AUDIO],
                 speechConfig: {
                     voiceConfig: {
                         prebuiltVoiceConfig: { voiceName: 'Kore' },
